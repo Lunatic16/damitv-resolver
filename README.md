@@ -17,7 +17,7 @@ unwrapping **WEBP**-disguised segments into raw **MPEG-TS**.
 
 [Features](#-features) · [Quick Start](#-quick-start) · [Docker](#-docker) · [Usage](#-usage) · [How It Works](#-how-it-works) · [API](#-http-api) · [Disclaimer](#-disclaimer)
 
-![DamiTV Stream Resolver console](docs/screenshot.png)
+![DamiTV Stream Resolver console](docs/Screenshot.png)
 
 </div>
 
