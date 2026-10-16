@@ -75,6 +75,8 @@ const ui = {
   video: document.getElementById("video-element") as HTMLVideoElement,
   overlay: document.getElementById("play-overlay") as HTMLButtonElement,
   exports: document.getElementById("exports")!,
+  watching: document.getElementById("stream-watching")!,
+  serverTag: document.getElementById("stream-server")!,
   error: document.getElementById("error-message") as HTMLElement,
   bannerText: document.getElementById("banner-text")!,
   bannerRetry: document.getElementById("banner-retry") as HTMLButtonElement,
@@ -120,6 +122,46 @@ const titleCase = (value: string) =>
   value.replace(/[-_]+/g, " ").replace(/\S+/g, (word) => word.charAt(0).toUpperCase() + word.slice(1));
 const isChannel = (match: Match) => match.alwaysLive;
 const isUpcoming = (match: Match) => !isChannel(match) && match.status !== "live";
+
+// Two-letter initials per side of a "A vs B" title, used when a match has no poster.
+const initialsFor = (title: string) => {
+  const sides = title.split(/\s+(?:vs\.?|v|-|–)\s+/i).filter(Boolean);
+  const parts = sides.length > 1 ? sides.slice(0, 2) : title.split(/\s+/).filter(Boolean).slice(0, 2);
+  return parts.map((part) => part.replace(/[^\p{L}\p{N}]/gu, "").slice(0, 2).toUpperCase()).join(" · ");
+};
+const hueFor = (value: string) => {
+  let hue = 0;
+  for (const char of value) hue = (hue * 31 + char.charCodeAt(0)) % 360;
+  return hue;
+};
+const matchKicker = (match: Match | undefined) =>
+  match ? [match.league, titleCase(match.category)].filter(Boolean).join(" · ") : "";
+const activeMatch = () => state.matches.find((match) => match.id === state.activeMatchId);
+
+const makeThumb = (match: Match) => {
+  const thumb = document.createElement("span");
+  thumb.className = "match__thumb";
+  const hue = hueFor(match.title);
+  thumb.style.background = `linear-gradient(135deg, hsl(${hue}, 55%, 30%), hsl(${(hue + 60) % 360}, 60%, 14%))`;
+  thumb.append(initialsFor(match.title));
+  if (match.poster) {
+    const poster = document.createElement("img");
+    poster.className = "match__poster";
+    poster.loading = "lazy";
+    poster.referrerPolicy = "no-referrer";
+    poster.alt = "";
+    poster.src = match.poster;
+    poster.onerror = () => poster.remove();
+    thumb.append(poster);
+  }
+  if (match.status === "live" && !isChannel(match)) {
+    const pill = document.createElement("span");
+    pill.className = "match__pill";
+    pill.textContent = "LIVE";
+    thumb.append(pill);
+  }
+  return thumb;
+};
 
 const formatWhen = (ms: number) =>
   new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -207,6 +249,7 @@ const setIdle = () => {
   ui.video.hidden = true;
   ui.overlay.hidden = true;
   ui.exports.hidden = true;
+  ui.watching.textContent = ui.serverTag.textContent = "";
   ui.audioSelect.hidden = true;
   ui.audioSelect.replaceChildren();
   ui.kicker.textContent = "Ready";
@@ -219,6 +262,11 @@ const setPlaying = () => {
   ui.screen.classList.add("is-active");
   ui.video.hidden = false;
   ui.exports.hidden = false;
+  const match = activeMatch();
+  ui.watching.textContent =
+    match && match.viewers > 0 && match.status === "live" && !isChannel(match)
+      ? `${match.viewers.toLocaleString("en-US")} watching`
+      : "";
 };
 
 const startTiming = (): PlaybackTimer => {
@@ -414,19 +462,7 @@ const renderMatches = () => {
       button.className = `match${match.id === state.activeMatchId ? " is-active" : ""}`;
       button.disabled = state.resolving;
 
-      if (match.poster) {
-        const poster = document.createElement("img");
-        poster.className = "match__poster";
-        poster.loading = "lazy";
-        poster.referrerPolicy = "no-referrer";
-        poster.alt = "";
-        poster.src = match.poster;
-        poster.onerror = () => {
-          poster.remove();
-          button.classList.add("no-poster");
-        };
-        button.append(poster);
-      }
+      button.append(makeThumb(match));
 
       const body = document.createElement("span");
       body.className = "match__body";
@@ -437,12 +473,6 @@ const renderMatches = () => {
       title.className = "match__title";
       title.textContent = match.title;
       top.append(title);
-      if (match.status === "live" && !isChannel(match)) {
-        const pill = document.createElement("span");
-        pill.className = "match__pill";
-        pill.textContent = "LIVE";
-        top.append(pill);
-      }
 
       const meta = document.createElement("span");
       meta.className = "match__meta";
@@ -534,14 +564,14 @@ const streamButton = (stream: StreamRow) => {
 };
 
 const renderServers = () => {
-  ui.serverCount.textContent = String(state.streams.length);
+  ui.serverCount.textContent = state.streams.length ? `${state.streams.length} available` : "";
   if (!state.streams.length) {
     ui.servers.hidden = true;
     ui.servers.replaceChildren();
     ui.serversEmpty.hidden = false;
     ui.serversEmpty.textContent = state.activeMatchId
       ? "No servers for this match right now."
-      : "Pick a match on the left to load servers.";
+      : "Pick a match to load servers.";
     return;
   }
   ui.serversEmpty.hidden = true;
@@ -552,19 +582,10 @@ const renderServers = () => {
       const box = document.createElement("section");
       box.className = "source";
 
-      // A lone group header is noise — only label when there is more than one.
-      if (groups.length > 1) {
-        const head = document.createElement("div");
-        head.className = "source__head";
-        const name = document.createElement("h3");
-        name.className = "source__name";
-        name.textContent = group.name;
-        const count = document.createElement("span");
-        count.className = "source__count";
-        count.textContent = String(group.streams.length);
-        head.append(name, count);
-        box.append(head);
-      }
+      const name = document.createElement("h3");
+      name.className = "source__name";
+      name.textContent = group.name;
+      box.append(name);
 
       const list = document.createElement("div");
       list.className = "source__list";
@@ -619,7 +640,7 @@ const selectMatch = async (match: Match) => {
   clearError();
   stopPlayback();
   setIdle();
-  ui.kicker.textContent = "Pick a server";
+  ui.kicker.textContent = matchKicker(match) || "Pick a server";
   ui.title.textContent = match.title;
   renderMatches();
   ui.status.className = "status is-loading";
@@ -650,7 +671,8 @@ const playStream = async (stream: StreamRow) => {
   clearError();
   stopPlayback();
   setIdle();
-  ui.kicker.textContent = `${titleCase(stream.source)} · ${stream.hd ? "HD" : "SD"} · Stream ${stream.streamNo}`;
+  ui.kicker.textContent = matchKicker(activeMatch()) || "Now playing";
+  ui.serverTag.textContent = `${titleCase(stream.source)} · ${stream.hd ? "HD" : "SD"} · Stream ${stream.streamNo}`;
   ui.title.textContent = stream.title || ui.title.textContent || "Stream";
   renderMatches();
   renderServers();
@@ -676,7 +698,7 @@ const playStream = async (stream: StreamRow) => {
     await startPlayback(result.relay, timing);
   } catch (error) {
     setIdle();
-    ui.kicker.textContent = "Pick a server";
+    ui.kicker.textContent = matchKicker(activeMatch()) || "Pick a server";
     ui.title.textContent = stream.title || "Choose a Match to Start";
     showError(error instanceof Error ? error.message : "Resolve failed");
   } finally {
