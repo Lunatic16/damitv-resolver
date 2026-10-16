@@ -1,0 +1,19 @@
+{
+  "name": "damitv-hls-proxy",
+  "version": "1.0.0",
+  "description": "Self-hosted DamiTV catalog and HLS proxy — live sports events, sanctioned embeds, referer-aware stream relay",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.client.json && cp src/client/index.html src/client/styles.css dist/client/ && rm -rf dist/embed/wasm && cp -R src/embed/wasm dist/embed/wasm",
+    "start": "npm run build && node dist/server/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit"
+  },
+  "dependencies": {
+    "happy-dom": "^21.0.3",
+    "impit": "^0.14.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

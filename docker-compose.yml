@@ -1,0 +1,13 @@
+services:
+  damitv-hls-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: damitv-hls-proxy
+    ports:
+      - "3007:3000"
+    environment:
+      - PORT=3000
+      - DAMITV_API_BASE=https://damitv.st/papi
+      - DAMITV_EMBED_ORIGIN=https://taifood-blog.asia
+    restart: unless-stopped
