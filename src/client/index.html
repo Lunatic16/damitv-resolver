@@ -7,7 +7,7 @@
   <title>DamiTV Resolver</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
 </head>
@@ -15,55 +15,65 @@
   <div class="app">
     <header class="topbar">
       <div class="topbar__brand">
+        <span class="topbar__mark" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"></path></svg>
+        </span>
         <span class="topbar__logo">DamiTV</span>
-        <span class="topbar__tag">Live + Channels</span>
       </div>
+
+      <label class="search">
+        <svg class="search__icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+        <input id="event-search" type="text" placeholder="Search matches and channels" aria-label="Search matches and channels" autocomplete="off" spellcheck="false">
+        <span class="search__key" aria-hidden="true">/</span>
+      </label>
+
       <div class="topbar__aside">
-        <div class="status" aria-live="polite">
+        <div class="status" role="status" aria-live="polite">
           <span class="status__dot" aria-hidden="true"></span>
           <span id="live-meta" class="status__text">—</span>
         </div>
-        <div class="topbar__actions">
-          <button
-            type="button"
-            id="playlist-download"
-            class="btn"
-            title="Download a dynamic M3U8 playlist of the currently listed matches and channels"
-          >Download M3U8 Playlist</button>
-          <button
-            type="button"
-            id="playlist-copy"
-            class="btn"
-            title="Copy the dynamic playlist URL for IPTV players like VLC, mpv, or TiviMate"
-          >Copy M3U8 URL</button>
-        </div>
-        <button type="button" id="refresh-button" class="btn">Refresh</button>
+        <button
+          type="button"
+          id="playlist-download"
+          class="btn"
+          title="Download a dynamic M3U8 playlist of the currently listed matches and channels"
+        >M3U8 playlist</button>
+        <button
+          type="button"
+          id="playlist-copy"
+          class="btn"
+          title="Copy the dynamic playlist URL for IPTV players like VLC, mpv, or TiviMate"
+        >Copy URL</button>
+        <button type="button" id="refresh-button" class="btn btn--icon" aria-label="Refresh" title="Refresh">
+          <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg>
+        </button>
       </div>
     </header>
 
-    <nav id="sport-tabs" class="sports" role="tablist" aria-label="Sport"></nav>
-    <p id="error-message" class="banner" hidden>
+    <nav id="sport-tabs" class="sports" aria-label="Sport"></nav>
+    <p id="error-message" class="banner" role="alert" hidden>
       <span id="banner-text"></span>
       <button type="button" id="banner-retry" class="btn btn--soft" hidden>Retry</button>
     </p>
 
     <div class="workspace">
-      <aside class="panel rail" aria-label="Live matches and channels">
-        <div class="panel__head">
-          <span class="panel__label">1 · Matches</span>
-          <div class="scope" role="group" aria-label="Scope">
-            <button type="button" class="scope__btn is-active" data-scope="live">Live</button>
-            <button type="button" class="scope__btn" data-scope="all">All</button>
-          </div>
-          <span id="match-count" class="panel__count">0</span>
-        </div>
-        <div class="rail__search">
-          <input id="event-search" type="text" placeholder="Search matches…  ( / )" autocomplete="off" spellcheck="false">
-        </div>
-        <ul id="match-list" class="matches"></ul>
-      </aside>
-
       <section class="stage" aria-label="Player">
+        <div class="screen">
+          <div class="screen__idle">
+            <p class="screen__idle-brand">DamiTV</p>
+            <p class="screen__idle-copy">Pick a match, choose a server, and it plays right here.</p>
+          </div>
+          <video id="video-element" class="screen__video" controls playsinline autoplay hidden></video>
+          <div class="screen__hud">
+            <span class="hud__live"><span aria-hidden="true"></span>LIVE</span>
+            <span id="stream-watching" class="hud__chip"></span>
+            <span id="stream-server" class="hud__chip hud__chip--server"></span>
+          </div>
+          <button type="button" id="play-overlay" class="play-overlay" hidden aria-label="Play">
+            <span aria-hidden="true"></span>
+          </button>
+        </div>
+
         <div class="stage__bar">
           <div class="stage__titles">
             <p id="stream-kicker" class="stage__kicker">Ready</p>
@@ -84,19 +94,21 @@
           </div>
         </div>
 
-        <div class="stage__shell">
-          <div class="screen">
-            <div class="screen__idle">
-              <p class="screen__idle-brand">DamiTV</p>
-              <p class="screen__idle-copy">Match on the left. Server on the right. Play here.</p>
-            </div>
-            <video id="video-element" class="screen__video" controls playsinline autoplay hidden></video>
-            <button type="button" id="play-overlay" class="play-overlay" hidden aria-label="Play">
-              <span aria-hidden="true"></span>
-            </button>
+        <div class="stage__lower">
+        <section id="stream-panel" class="card servers" aria-label="Stream servers">
+          <div class="card__head">
+            <h2 class="card__title">Servers</h2>
+            <span id="stream-count" class="card__count">0</span>
           </div>
+          <div id="stream-empty" class="card__empty">Pick a match to load servers.</div>
+          <div id="stream-list" class="streams__grid" hidden></div>
+        </section>
 
-          <div id="exports" class="exports" hidden>
+        <section id="exports" class="card exports" aria-label="Watch elsewhere" hidden>
+          <div class="card__head">
+            <h2 class="card__title">Watch elsewhere</h2>
+          </div>
+          <div class="exports__grid">
             <div class="export">
               <span class="export__k">Direct</span>
               <div class="export__row">
@@ -126,17 +138,20 @@
               </div>
             </div>
           </div>
+        </section>
         </div>
       </section>
 
-      <aside id="stream-panel" class="panel servers" aria-label="Stream servers">
-        <div class="panel__head">
-          <span class="panel__label">2 · Servers</span>
-          <span class="panel__hint">Then play</span>
-          <span id="stream-count" class="panel__count">0</span>
+      <aside class="card rail" aria-label="Live matches and channels">
+        <div class="card__head">
+          <h2 class="card__title card__title--lg">Matches</h2>
+          <span id="match-count" class="card__count">0</span>
+          <div class="scope" role="group" aria-label="Scope">
+            <button type="button" class="scope__btn is-active" data-scope="live">Live</button>
+            <button type="button" class="scope__btn" data-scope="all">All</button>
+          </div>
         </div>
-        <div id="stream-empty" class="panel__empty">Pick a match on the left to load servers.</div>
-        <div id="stream-list" class="streams__grid" hidden></div>
+        <ul id="match-list" class="matches"></ul>
       </aside>
     </div>
   </div>
