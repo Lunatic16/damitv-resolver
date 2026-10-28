@@ -37,6 +37,14 @@ export type StreamLink = {
   language: string;
   hd: boolean;
   embedUrl: string;
+  // Direct tokened playlist from /papi/extract-url. When present the resolve
+  // step skips the embed handshake entirely and relays this URL.
+  m3u8?: string;
+  // Manual-source relay path (e.g. "/dl/26.m3u8"): needs a fresh hls-token
+  // minted at tune-in time before it can be fetched.
+  dlPath?: string;
+  // Upstream label for alternate feeds (e.g. "NBA League Pass (Away)").
+  name?: string;
   source: string;
   viewers: number;
 };

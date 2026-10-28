@@ -1,17 +1,33 @@
 import { Readable } from "node:stream";
+import { gunzipSync, inflateSync } from "node:zlib";
 
 import { Impit } from "impit";
 
 import { httpHeaders } from "../api/headers.js";
 
-// The CDNs behind the unlock filter by TLS fingerprint (JA3): plain runtime
-// fetch gets 403 while a browser-impersonating client passes. Route every CDN
-// pull through Impit's chrome transport, like the reference resolver does.
+// Transport selection (verified 2026-10-27):
+// - messi.damitv.st live-hls playlists are token-bound to the client that
+//   minted the token via /papi/extract-url — that mint goes over plain
+//   runtime fetch, and only the same plain stack passes the playlist gate
+//   (browser-impersonating TLS stacks get nginx 403). Referer required.
+// - The playlists' segments are TikTok CDN "image" URLs smuggling TS: their
+//   CDN 403s any DamitTV Referer/Origin, so those ship with neither.
+// - The legacy embed CDN (wasm handshake host) still JA3-filters plain
+//   fetch, so it keeps the browser-impersonating client.
 const cdn = new Impit({ browser: "chrome151" });
 
-function requestHeaders(referer?: string, range?: string | null): Record<string, string> {
-  const headers = httpHeaders(referer, { Accept: "*/*" });
-  if (referer) headers.Origin = new URL(referer).origin;
+function isDamiHost(hostname: string): boolean {
+  return hostname === "damitv.st" || hostname.endsWith(".damitv.st") || hostname === "ondemand.st";
+}
+
+function isTikTokHost(hostname: string): boolean {
+  return hostname.includes("tiktokcdn") || hostname.endsWith("tiktok.com") || hostname.endsWith("tiktokcdn.com");
+}
+
+function requestHeaders(referer?: string, range?: string | null, stripReferer = false): Record<string, string> {
+  const effective = stripReferer ? undefined : referer;
+  const headers = httpHeaders(effective, { Accept: "*/*" });
+  if (effective) headers.Origin = new URL(effective).origin;
   if (range) headers.Range = range;
   return headers;
 }
@@ -22,6 +38,17 @@ export async function pullResponse(
   range?: string | null,
   signal?: AbortSignal,
 ): Promise<Response> {
+  const hostname = new URL(url).hostname;
+  if (isTikTokHost(hostname) || isDamiHost(hostname)) {
+    const init: RequestInit = {
+      headers: requestHeaders(referer, range, isTikTokHost(hostname)),
+      redirect: "follow",
+    };
+    if (signal) init.signal = signal;
+    const res = await fetch(url, init);
+    if (!res.ok) throw new Error(`upstream ${res.status}: ${res.statusText.trim() || "failed"}`);
+    return res as unknown as Response;
+  }
   const init: Parameters<typeof cdn.fetch>[1] = { headers: requestHeaders(referer, range) };
   if (signal) init.signal = signal;
   const res = await cdn.fetch(url, init);
@@ -40,6 +67,80 @@ export async function pull(url: string, referer?: string): Promise<Buffer> {
 // the upstream pull the moment the TS body is complete.
 
 type TsMeta = { offset: number; length: number };
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+// --- PNG pixel smuggling (TIKTIKPX, dl/ relays) ----------------------------
+// A real 8-bit RGB(A) PNG whose raw pixel bytes spell "TIKTIKPX" + u32 BE
+// length + gzip(TS). Needs the full body: the whole IDAT stream deflates to
+// the filtered pixels, which are PNG-unfiltered to recover the payload.
+function decodePngTs(buf: Buffer): Buffer | null {
+  if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
+  let pos = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  const idat: Buffer[] = [];
+  while (pos + 8 <= buf.length) {
+    const length = buf.readUInt32BE(pos);
+    const type = buf.toString("ascii", pos + 4, pos + 8);
+    if (type === "IHDR") {
+      width = buf.readUInt32BE(pos + 8);
+      height = buf.readUInt32BE(pos + 12);
+      bitDepth = buf[pos + 16] ?? 0;
+      colorType = buf[pos + 17] ?? 0;
+    } else if (type === "IDAT") {
+      idat.push(Buffer.from(buf.subarray(pos + 8, pos + 8 + length)));
+    } else if (type === "IEND") {
+      break;
+    }
+    pos += 12 + length;
+  }
+  if (!width || !height || bitDepth !== 8 || (colorType !== 2 && colorType !== 6)) return null;
+  const bpp = colorType === 6 ? 4 : 3;
+  const stride = width * bpp;
+  let filtered: Buffer;
+  try {
+    filtered = inflateSync(Buffer.concat(idat));
+  } catch {
+    return null;
+  }
+  const out = Buffer.allocUnsafe(height * stride);
+  let src = 0;
+  for (let y = 0; y < height; y++) {
+    if (src + 1 + stride > filtered.length) return null;
+    const filter = filtered[src++] ?? 0;
+    const rowStart = y * stride;
+    for (let i = 0; i < stride; i++) {
+      const x = filtered[src + i] ?? 0;
+      const a = i >= bpp ? (out[rowStart + i - bpp] ?? 0) : 0;
+      const b = y > 0 ? (out[rowStart - stride + i] ?? 0) : 0;
+      const c = y > 0 && i >= bpp ? (out[rowStart - stride + i - bpp] ?? 0) : 0;
+      let v = x;
+      if (filter === 1) v += a;
+      else if (filter === 2) v += b;
+      else if (filter === 3) v += (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      }
+      out[rowStart + i] = v & 0xff;
+    }
+    src += stride;
+  }
+  if (out.length < 12 || out.toString("ascii", 0, 8) !== "TIKTIKPX") return null;
+  const tsLen = out.readUInt32BE(8);
+  if (tsLen <= 0 || 12 + tsLen > out.length) return null;
+  try {
+    return gunzipSync(out.subarray(12, 12 + tsLen));
+  } catch {
+    return null;
+  }
+}
 
 function readWebpTsMeta(buf: Buffer, total: number): TsMeta | null {
   if (buf.length < 20 || buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WEBP") {
@@ -89,6 +190,7 @@ export function pullSegmentStream(
     let settled = false;
     let finished = false;
     let unwrapped = false;
+    let pngMode = false;
     let left = 0;
     let total = 0;
     let upstreamType: string | null = null;
@@ -145,6 +247,12 @@ export function pullSegmentStream(
       if (finished) return;
       if (!settled) {
         pending = Buffer.concat([pending, raw]);
+        if (!pngMode && pending.length >= 8 && pending.subarray(0, 8).equals(PNG_SIGNATURE)) {
+          // TIKTIKPX pixel smuggling — hold the whole body, decode at end.
+          pngMode = true;
+          return;
+        }
+        if (pngMode) return;
         const meta = readWebpTsMeta(pending, total);
         if (meta) {
           settle(true, meta);
@@ -186,6 +294,27 @@ export function pullSegmentStream(
       });
       node.on("end", () => {
         if (finished) return;
+        if (pngMode) {
+          const ts = decodePngTs(pending);
+          if (!ts) {
+            fail(new Error("png segment decode failed"));
+            return;
+          }
+          finished = true;
+          settled = true;
+          unwrapped = true;
+          out = new Readable({ read() {} });
+          out.push(ts);
+          out.push(null);
+          stop();
+          resolve({
+            stream: out,
+            contentLength: ts.length,
+            unwrapped: true,
+            contentType: "video/mp2t",
+          });
+          return;
+        }
         if (settled && !unwrapped) {
           finished = true;
           out?.push(null);

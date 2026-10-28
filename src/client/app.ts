@@ -19,6 +19,8 @@ type StreamRow = {
   language: string;
   hd: boolean;
   embedUrl: string;
+  m3u8?: string;
+  name?: string;
   source: string;
   viewers: number;
   matchId?: string;
@@ -544,7 +546,7 @@ const streamButton = (stream: StreamRow) => {
 
   const title = document.createElement("span");
   title.className = "chip__title";
-  title.textContent = `Stream ${stream.streamNo}`;
+  title.textContent = stream.name || `Stream ${stream.streamNo}`;
 
   button.append(badge, title);
 
@@ -672,7 +674,7 @@ const playStream = async (stream: StreamRow) => {
   stopPlayback();
   setIdle();
   ui.kicker.textContent = matchKicker(activeMatch()) || "Now playing";
-  ui.serverTag.textContent = `${titleCase(stream.source)} · ${stream.hd ? "HD" : "SD"} · Stream ${stream.streamNo}`;
+  ui.serverTag.textContent = `${titleCase(stream.source)} · ${stream.hd ? "HD" : "SD"} · ${stream.name || `Stream ${stream.streamNo}`}`;
   ui.title.textContent = stream.title || ui.title.textContent || "Stream";
   renderMatches();
   renderServers();

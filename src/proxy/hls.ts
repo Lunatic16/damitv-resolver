@@ -1,5 +1,6 @@
 import { Readable } from "node:stream";
 
+import { resolveChannelM3u8 } from "../api/damitv.js";
 import { makeEmbedSlot } from "../embed/slot.js";
 import { unlockEmbedSlot } from "../embed/unlock.js";
 import { pullResponse, pullSegmentStream } from "./pull.js";
@@ -11,6 +12,14 @@ const cors = {
 } as const;
 
 const PLAYLIST_MIME = "application/vnd.apple.mpegurl";
+
+// Resolve a playlist slot (source/id from playlist entries) at tune-in time.
+// resolveChannelM3u8 mints a fresh token bound to this process's plain fetch
+// stack (extract-url playlist, or a manual /dl relay with a fresh hls-token);
+// the wasm embed handshake remains the fallback for legacy embed slots.
+async function resolveSlot(id: string, stream?: number): Promise<{ m3u8: string; referer: string }> {
+  return (await resolveChannelM3u8(id, stream)) ?? unlockEmbedSlot(makeEmbedSlot(id));
+}
 
 const passThrough = ["content-type", "content-length", "content-range", "accept-ranges"] as const;
 
@@ -47,6 +56,8 @@ export async function proxyHls(request: Request): Promise<Response> {
   const refererParam = url.searchParams.get("referer");
   const source = url.searchParams.get("source");
   const id = url.searchParams.get("id");
+  const streamParam = url.searchParams.get("stream");
+  const streamNo = streamParam ? Number(streamParam) || undefined : undefined;
   let target = url.searchParams.get("url");
   let referer = refererParam ?? undefined;
   // Slot hint carried in url-mode relays: on an upstream rejection (tokens
@@ -58,7 +69,14 @@ export async function proxyHls(request: Request): Promise<Response> {
     // tune-in time. The first playlist fetch resolves the slot; every URI it
     // returns is rewritten to url-mode, so refreshes stay cheap.
     if (!target && slot) {
-      const unlocked = await unlockEmbedSlot(makeEmbedSlot(slot.id));
+      // One retry around the whole slot resolution: hls-token mints are
+      // rate-sensitive and occasionally fail transiently.
+      let unlocked: { m3u8: string; referer: string };
+      try {
+        unlocked = await resolveSlot(slot.id, streamNo);
+      } catch {
+        unlocked = await resolveSlot(slot.id, streamNo);
+      }
       target = unlocked.m3u8;
       referer = referer ?? unlocked.referer;
     }
@@ -79,7 +97,7 @@ export async function proxyHls(request: Request): Promise<Response> {
       upstream = await pullResponse(target, referer, request.headers.get("range"), request.signal);
     } catch (err) {
       if (!slot) throw err;
-      const healed = await unlockEmbedSlot(makeEmbedSlot(slot.id));
+      const healed = await resolveSlot(slot.id, streamNo);
       target = healed.m3u8;
       referer = healed.referer;
       upstream = await pullResponse(target, referer, request.headers.get("range"), request.signal);
@@ -96,8 +114,9 @@ export async function proxyHls(request: Request): Promise<Response> {
       });
     }
 
-    // Binary: segments ship WEBP-wrapped on this CDN — unwrap to raw TS;
-    // anything else streams through verbatim.
+    // Binary: segments ship disguised on this CDN — RIFF/WEBP-wrapped on the
+    // messi live-hls path, TIKTIKPX pixel-PNG on the /dl relays. Both unwrap
+    // to raw TS; anything else streams through verbatim.
     if (upstream.body) {
       const { stream, contentLength, unwrapped, contentType } = await pullSegmentStream(
         target,

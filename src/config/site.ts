@@ -6,6 +6,11 @@ export const fetchTimeoutMs = Number(process.env.FETCH_TIMEOUT_MS ?? "15000");
 // /papi/stream/{source}/{id}. This is the up-to-date catalog source.
 export const damitvApiBase = process.env.DAMITV_API_BASE ?? "https://damitv.st/papi";
 
+// Referer sent with DAMITV API and playlist requests. The catalog endpoints
+// answer without it, but /papi/extract-url and the messi.damitv.st live-hls
+// playlists 403 unless the request carries this origin.
+export const damitvReferer = process.env.DAMITV_REFERER ?? "https://damitv.st/";
+
 // Origin of the embed player pages (the wasm handshake host). The public API
 // only returns relative /embed/... paths; this is where they resolve.
 export const damitvEmbedOrigin = process.env.DAMITV_EMBED_ORIGIN ?? "https://taifood-blog.asia";

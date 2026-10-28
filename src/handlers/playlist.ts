@@ -15,7 +15,7 @@ function groupOf(match: Match): string {
 
 function entry(origin: string, match: Match, link: StreamLink): string {
   const quality = link.hd ? "HD" : "SD";
-  const label = `${match.title} — Stream ${link.streamNo} (${quality})`;
+  const label = `${match.title} — ${link.name || `Stream ${link.streamNo}`} (${quality})`;
   const attrs =
     ` tvg-id="${esc(`${link.source}:${link.id}`)}"` +
     ` tvg-name="${esc(match.title)}"` +
@@ -23,6 +23,7 @@ function entry(origin: string, match: Match, link: StreamLink): string {
   const target = `${origin}/api/hls?${new URLSearchParams({
     source: link.source,
     id: link.id,
+    stream: String(link.streamNo),
   })}`;
   return `#EXTINF:-1${attrs},${label}\n${target}`;
 }
